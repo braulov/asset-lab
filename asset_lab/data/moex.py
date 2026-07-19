@@ -25,6 +25,10 @@ class MoexClient:
     """Small explicit client for the public MOEX ISS JSON API."""
 
     base_url = "https://iss.moex.com/iss"
+    secid_aliases = {
+        # MOEX shows USDRUB_TOM as the contract code, while ISS uses this SECID.
+        "USDRUB_TOM": "USD000UTSTOM",
+    }
 
     def __init__(self, timeout_seconds: float = 30.0) -> None:
         self.timeout_seconds = timeout_seconds
@@ -35,6 +39,11 @@ class MoexClient:
                 "Accept": "application/json",
             }
         )
+
+    @classmethod
+    def normalize_secid(cls, secid: str) -> str:
+        normalized = secid.strip().upper()
+        return cls.secid_aliases.get(normalized, normalized)
 
     def _get_json(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         url = f"{self.base_url}/{path.lstrip('/')}"
@@ -87,7 +96,7 @@ class MoexClient:
         return frame.head(limit).reset_index(drop=True)
 
     def get_boards(self, secid: str) -> pd.DataFrame:
-        secid = secid.strip().upper()
+        secid = self.normalize_secid(secid)
         payload = self._get_json(
             f"securities/{secid}.json",
             {
@@ -101,7 +110,7 @@ class MoexClient:
         return self.table_to_frame(payload, "boards")
 
     def resolve_route(self, secid: str, preferred_board: str | None = None) -> InstrumentRoute:
-        secid = secid.strip().upper()
+        secid = self.normalize_secid(secid)
         boards = self.get_boards(secid)
         if boards.empty:
             raise MoexApiError(f"Для {secid} не найдены торговые доски.")
