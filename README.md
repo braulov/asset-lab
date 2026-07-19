@@ -89,19 +89,6 @@ Open the local URL printed by Streamlit, normally `http://localhost:8501`.
 
 The page selector appears in the Streamlit sidebar.
 
-## Updating an existing Asset Lab directory
-
-Stop Streamlit with `Ctrl+C`, then unpack v6 over a clean project directory. Keeping v5 as a backup is recommended because v6 changes the application to a multipage layout.
-
-```bash
-cd ~
-unzip ~/Downloads/asset-lab-mvp-v6.zip
-cd asset-lab-mvp-v6
-source .venv/bin/activate  # or create a new venv
-python -m pip install -e ".[dev]"
-python -m streamlit run app.py
-```
-
 ## Multi-asset hourly ZIP
 
 The Hourly Moments page accepts ZIP files containing hourly candle CSV or CSV.GZ files. The expected columns are:
