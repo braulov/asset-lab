@@ -37,6 +37,13 @@ def instrument_label(row: pd.Series) -> str:
 
 
 def render_data_selector() -> tuple[str, str]:
+    pending_secid = st.session_state.pop("pending_secid", None)
+    if pending_secid:
+        st.session_state["instrument_choice"] = "Другой инструмент"
+        st.session_state["custom_secid"] = str(pending_secid).strip().upper()
+    st.session_state.setdefault("instrument_choice", "Индекс МосБиржи")
+    st.session_state.setdefault("custom_secid", "")
+
     with st.sidebar:
         st.header("Данные")
 
@@ -50,7 +57,6 @@ def render_data_selector() -> tuple[str, str]:
         if preset_secid is None:
             secid = st.text_input(
                 "Код инструмента (SECID)",
-                value=st.session_state.get("custom_secid", ""),
                 key="custom_secid",
                 placeholder="Например, GAZP",
             ).strip().upper()
@@ -86,8 +92,7 @@ def render_data_selector() -> tuple[str, str]:
                         key="instrument_search_result",
                     )
                     if st.button("Выбрать", use_container_width=True):
-                        st.session_state["instrument_choice"] = "Другой инструмент"
-                        st.session_state["custom_secid"] = found_secid
+                        st.session_state["pending_secid"] = found_secid
                         st.rerun()
 
         interval = st.selectbox(
