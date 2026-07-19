@@ -2,18 +2,18 @@
 
 Interactive Streamlit laboratory for MOEX daily and hourly OHLC data.
 
-Version 6 keeps the validated daily v5 workflow and adds a separate hourly research page for the mechanisms identified in the multi-asset study: M2/M3, price mobility, overnight asymmetry, preheated versus abrupt shocks and amplitude-aware relaxation models.
+Version 6 keeps the validated daily v5 workflow and adds the hourly mechanisms identified in the multi-asset study: M2/M3, price mobility, overnight asymmetry, preheated versus abrupt shocks and amplitude-aware relaxation models.
 
-The application opens directly on **Daily Lab**. The navigation contains only two working pages:
+The application has one workspace. Use the **Interval** field in the sidebar to switch between:
 
-- **Daily Lab**;
-- **Hourly Moments**.
+- **1 day** — the validated daily workflow;
+- **1 hour** — hourly moments, mobility and shock relaxation.
 
-There is no separate landing page duplicating this README.
+There is no separate page navigation or landing page.
 
-## Daily Lab
+## Daily workflow
 
-The daily page preserves the v5 methodology:
+The daily interval preserves the v5 methodology:
 
 - multiple OHLC variance proxies;
 - exclusion of the still-forming daily candle;
@@ -28,9 +28,9 @@ The daily page preserves the v5 methodology:
 - event-level cross-validation;
 - flat-rate versus Omori aftershock tests.
 
-## Hourly Moments
+## Hourly workflow
 
-The hourly page supports either a live MOEX SECID or a multi-asset ZIP produced by the supplied hourly exporter.
+The hourly interval supports either a live MOEX SECID or a multi-asset ZIP produced by the supplied hourly exporter.
 
 It provides:
 
@@ -89,7 +89,7 @@ Its relaxation rate changes nonlinearly with the initial event amplitude. The UI
 
 ## Interface
 
-Exact parameter values are entered through numeric fields. A thin strip below each field shows where the value lies inside its admissible range. The shock-analysis controls are collapsed below the process description, leaving the top of the page for the dataset summary and results.
+The **Interval** field is the only workflow selector. Exact analysis parameters are entered through numeric fields. A thin strip below each field shows where the value lies inside its admissible range. The shock-analysis controls are collapsed below the process description, leaving the top of the workspace for the dataset summary and results.
 
 ## Interpretation rules built into v6
 
@@ -121,7 +121,7 @@ Open the local URL printed by Streamlit, normally `http://localhost:8501`.
 
 ## Multi-asset hourly ZIP
 
-The Hourly Moments page accepts ZIP files containing hourly candle CSV or CSV.GZ files. The expected columns are:
+The hourly workflow accepts ZIP files containing hourly candle CSV or CSV.GZ files. The expected columns are:
 
 ```text
 begin, end, open, close, high, low, value, volume
