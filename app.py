@@ -6,12 +6,15 @@ import re
 import pandas as pd
 import streamlit as st
 
+import asset_lab.localization as localization
 from asset_lab.data.moex import MoexApiError, MoexClient
-from asset_lab.localization import install_russian_interface
+from asset_lab.localization_content import EXTRA_PHRASES, EXTRA_TEXT
 
 
 st.set_page_config(page_title="Asset Lab v6", page_icon="📈", layout="wide")
-install_russian_interface()
+localization.EXACT_TEXT.update(EXTRA_TEXT)
+localization.PHRASE_REPLACEMENTS += EXTRA_PHRASES
+localization.install_russian_interface()
 
 INTERVAL_OPTIONS = ("1 day", "1 hour")
 INSTRUMENTS: dict[str, str | None] = {
