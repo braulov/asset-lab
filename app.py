@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 import re
+from typing import Any, Callable
 
 import pandas as pd
 import streamlit as st
@@ -13,7 +15,12 @@ from asset_lab.localization_content import EXTRA_PHRASES, EXTRA_TEXT
 
 st.set_page_config(page_title="Asset Lab v6", page_icon="📈", layout="wide")
 localization.EXACT_TEXT.update(EXTRA_TEXT)
-localization.PHRASE_REPLACEMENTS += EXTRA_PHRASES
+localization.PHRASE_REPLACEMENTS = tuple(
+    dict.fromkeys((*localization.PHRASE_REPLACEMENTS, *EXTRA_PHRASES))
+)
+# Streamlit may recreate its exported UI methods between script runs. Reinstall the
+# wrappers instead of relying on module state from the previous run.
+localization._PATCHED = False
 localization.install_russian_interface()
 
 INTERVAL_OPTIONS = ("1 day", "1 hour")
@@ -37,6 +44,16 @@ def instrument_label(row: pd.Series) -> str:
     name = shortname if shortname and shortname.lower() != "nan" else secid
     suffix = f" · {board}" if board and board.lower() != "nan" else ""
     return f"{name} — {secid}{suffix}"
+
+
+def _localized_format_func(
+    existing: Callable[[Any], Any] | None,
+) -> Callable[[Any], Any]:
+    def render(value: Any) -> Any:
+        displayed = existing(value) if existing is not None else value
+        return localization.translate_text(displayed)
+
+    return render
 
 
 def render_data_selector() -> tuple[str, str]:
@@ -108,7 +125,139 @@ def render_data_selector() -> tuple[str, str]:
     return secid, interval
 
 
-def prepare_page_source(page_path: Path, interval: str) -> str:
+def _call_name(function: ast.expr) -> str:
+    parts: list[str] = []
+    current: ast.expr | None = function
+    while isinstance(current, ast.Attribute):
+        parts.append(current.attr)
+        current = current.value
+    if isinstance(current, ast.Name):
+        parts.append(current.id)
+    return ".".join(reversed(parts))
+
+
+def _translate_expression(expression: ast.expr) -> ast.expr:
+    if isinstance(expression, ast.Constant) and isinstance(expression.value, str):
+        return ast.copy_location(
+            ast.Constant(value=localization.translate_text(expression.value)),
+            expression,
+        )
+    if isinstance(expression, ast.JoinedStr):
+        expression.values = [
+            _translate_expression(value) if isinstance(value, ast.expr) else value
+            for value in expression.values
+        ]
+        return expression
+    if isinstance(expression, (ast.List, ast.Tuple, ast.Set)):
+        expression.elts = [_translate_expression(item) for item in expression.elts]
+        return expression
+    if isinstance(expression, ast.Dict):
+        expression.keys = [
+            _translate_expression(key) if isinstance(key, ast.expr) else key
+            for key in expression.keys
+        ]
+        return expression
+    return expression
+
+
+class _RussianUiTransformer(ast.NodeTransformer):
+    _label_methods = {
+        "title",
+        "header",
+        "subheader",
+        "caption",
+        "markdown",
+        "write",
+        "info",
+        "warning",
+        "error",
+        "success",
+        "metric",
+        "text_input",
+        "text_area",
+        "date_input",
+        "time_input",
+        "number_input",
+        "slider",
+        "checkbox",
+        "toggle",
+        "button",
+        "download_button",
+        "file_uploader",
+        "expander",
+        "spinner",
+        "status",
+        "toast",
+    }
+    _choice_methods = {"selectbox", "radio", "multiselect", "pills", "segmented_control"}
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:
+        self.generic_visit(node)
+        name = _call_name(node.func)
+        method = name.rsplit(".", 1)[-1]
+
+        if name.startswith("st.") and method in self._label_methods:
+            if node.args:
+                node.args[0] = _translate_expression(node.args[0])
+            for keyword in node.keywords:
+                if keyword.arg in {"label", "help", "placeholder"}:
+                    keyword.value = _translate_expression(keyword.value)
+
+        elif name.startswith("st.") and method in self._choice_methods:
+            if node.args:
+                node.args[0] = _translate_expression(node.args[0])
+            for keyword in node.keywords:
+                if keyword.arg in {"label", "help", "placeholder"}:
+                    keyword.value = _translate_expression(keyword.value)
+            format_keyword = next(
+                (keyword for keyword in node.keywords if keyword.arg == "format_func"),
+                None,
+            )
+            existing = format_keyword.value if format_keyword is not None else ast.Constant(None)
+            composed = ast.Call(
+                func=ast.Name(id="_localized_format_func", ctx=ast.Load()),
+                args=[existing],
+                keywords=[],
+            )
+            if format_keyword is None:
+                node.keywords.append(ast.keyword(arg="format_func", value=composed))
+            else:
+                format_keyword.value = composed
+
+        elif name == "st.tabs" and node.args:
+            node.args[0] = _translate_expression(node.args[0])
+
+        elif method == "update_layout":
+            for keyword in node.keywords:
+                if keyword.arg in {
+                    "title",
+                    "title_text",
+                    "xaxis_title",
+                    "yaxis_title",
+                    "legend_title",
+                }:
+                    keyword.value = _translate_expression(keyword.value)
+
+        elif name in {"go.Scatter", "go.Bar", "go.Candlestick"}:
+            for keyword in node.keywords:
+                if keyword.arg in {"name", "hovertemplate", "texttemplate"}:
+                    keyword.value = _translate_expression(keyword.value)
+
+        elif method == "line_figure":
+            if len(node.args) > 1:
+                node.args[1] = _translate_expression(node.args[1])
+            if len(node.args) > 2:
+                node.args[2] = _translate_expression(node.args[2])
+            if len(node.args) > 3:
+                node.args[3] = _translate_expression(node.args[3])
+
+        elif method in {"price_figure", "heatmap_figure"} and len(node.args) > 1:
+            node.args[1] = _translate_expression(node.args[1])
+
+        return node
+
+
+def prepare_page_tree(page_path: Path, interval: str) -> ast.Module:
     source = page_path.read_text(encoding="utf-8")
     source = re.sub(
         r'^st\.set_page_config\([^\n]*\)\n',
@@ -134,7 +283,11 @@ def prepare_page_source(page_path: Path, interval: str) -> str:
         raise RuntimeError("Не удалось подключить выбранный инструмент к дневному анализу.")
     if interval == "1 hour" and 'st.session_state["selected_secid"]' not in source:
         raise RuntimeError("Не удалось подключить выбранный инструмент к часовому анализу.")
-    return source
+
+    tree = ast.parse(source, filename=str(page_path))
+    tree = _RussianUiTransformer().visit(tree)
+    ast.fix_missing_locations(tree)
+    return tree
 
 
 def run_asset_lab() -> None:
@@ -144,14 +297,15 @@ def run_asset_lab() -> None:
         if selected_interval == "1 day"
         else "pages/hourly_moments.py"
     )
-    source = prepare_page_source(page_path, selected_interval)
+    tree = prepare_page_tree(page_path, selected_interval)
     namespace = {
         "__name__": "__main__",
         "__file__": str(page_path),
         "__package__": None,
         "interval_label": selected_interval,
+        "_localized_format_func": _localized_format_func,
     }
-    exec(compile(source, str(page_path), "exec"), namespace)
+    exec(compile(tree, str(page_path), "exec"), namespace)
 
 
 navigation = st.navigation(
