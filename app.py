@@ -27,7 +27,7 @@ localization.install_russian_interface()
 INTERVAL_OPTIONS = ("1 day", "1 hour")
 INSTRUMENTS: dict[str, str | None] = {
     "Индекс МосБиржи": "IMOEX",
-    "Доллар/рубль": "USDRUB_TOM",
+    "Доллар/рубль": "USD000UTSTOM",
     "Сбербанк": "SBER",
     "Другой инструмент": None,
 }
@@ -150,7 +150,7 @@ def render_data_selector() -> tuple[str, str]:
                         format_func=lambda value: labels.get(value, value),
                         key="instrument_search_result",
                     )
-                    if st.button("Выбрать", use_container_width=True):
+                    if st.button("Выбрать", width="stretch"):
                         st.session_state["pending_secid"] = found_secid
                         st.rerun()
 
@@ -199,6 +199,22 @@ def _translate_expression(expression: ast.expr) -> ast.expr:
     return expression
 
 
+def _modern_width_value(expression: ast.expr) -> ast.expr:
+    if isinstance(expression, ast.Constant) and isinstance(expression.value, bool):
+        return ast.copy_location(
+            ast.Constant(value="stretch" if expression.value else "content"),
+            expression,
+        )
+    return ast.copy_location(
+        ast.IfExp(
+            test=expression,
+            body=ast.Constant(value="stretch"),
+            orelse=ast.Constant(value="content"),
+        ),
+        expression,
+    )
+
+
 class _RussianUiTransformer(ast.NodeTransformer):
     _label_methods = {
         "title",
@@ -233,6 +249,11 @@ class _RussianUiTransformer(ast.NodeTransformer):
         self.generic_visit(node)
         name = _call_name(node.func)
         method = name.rsplit(".", 1)[-1]
+
+        for keyword in node.keywords:
+            if keyword.arg == "use_container_width":
+                keyword.arg = "width"
+                keyword.value = _modern_width_value(keyword.value)
 
         if method == "slider":
             if node.args:
