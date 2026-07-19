@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from numbers import Real
+from typing import Any, Callable
 
 import streamlit as st
 
@@ -142,10 +143,15 @@ def bounded_number_input(
     min_value: int | float,
     max_value: int | float,
     value: int | float,
-    step: int | float,
-    key: str,
+    step: int | float | None = None,
+    key: str | None = None,
     format: str | None = None,
     help: str | None = None,
+    on_change: Callable[..., Any] | None = None,
+    args: tuple[Any, ...] | None = None,
+    kwargs: dict[str, Any] | None = None,
+    disabled: bool = False,
+    label_visibility: str = "visible",
 ) -> int | float:
     result = st.number_input(
         label,
@@ -156,6 +162,11 @@ def bounded_number_input(
         key=key,
         format=format,
         help=help,
+        on_change=on_change,
+        args=args,
+        kwargs=kwargs,
+        disabled=disabled,
+        label_visibility=label_visibility,
     )
     span = float(max_value) - float(min_value)
     fraction = 0.0 if span <= 0 else (float(result) - float(min_value)) / span
@@ -164,11 +175,13 @@ def bounded_number_input(
     right = _format_bound(max_value, format)
     st.markdown(
         f"""
-        <div class="asset-range-wrap" aria-hidden="true">
-            <div class="asset-range-track">
-                <div class="asset-range-fill" style="width:{percentage:.2f}%"></div>
+        <div aria-hidden="true" style="margin-top:-0.55rem;margin-bottom:0.45rem">
+            <div style="width:100%;height:4px;border-radius:999px;overflow:hidden;background:rgba(255,255,255,0.10)">
+                <div style="width:{percentage:.2f}%;height:100%;border-radius:999px;background:linear-gradient(90deg,{ACCENT},{ACCENT_SECONDARY})"></div>
             </div>
-            <div class="asset-range-labels"><span>{left}</span><span>{right}</span></div>
+            <div style="display:flex;justify-content:space-between;margin-top:0.22rem;color:rgba(235,239,247,0.46);font-size:0.66rem;line-height:1">
+                <span>{left}</span><span>{right}</span>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
