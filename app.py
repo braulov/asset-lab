@@ -6,6 +6,7 @@ import re
 from typing import Any, Callable
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 import asset_lab.localization as localization
@@ -93,6 +94,66 @@ def _bounded_slider_input(
         disabled=disabled,
         label_visibility=label_visibility,
     )
+
+
+def _has_meaningful_volume(candles: pd.DataFrame) -> bool:
+    if "volume" not in candles.columns:
+        return False
+    volume = pd.to_numeric(candles["volume"], errors="coerce").fillna(0.0)
+    return bool(volume.abs().gt(0.0).any())
+
+
+def _price_figure_candles(candles: pd.DataFrame) -> pd.DataFrame:
+    if _has_meaningful_volume(candles):
+        return candles
+    return candles.drop(columns=["volume"], errors="ignore")
+
+
+def _price_figure_title(title: str, candles: pd.DataFrame) -> str:
+    if _has_meaningful_volume(candles):
+        return title
+    return title.replace("hourly price and volume", "hourly price").replace(
+        "price and volume", "price"
+    )
+
+
+def _log_return_figure(
+    time_axis: pd.Index,
+    returns: pd.Series,
+    max_gap_days: int,
+    exclude_long_gaps: bool,
+) -> go.Figure:
+    if exclude_long_gaps:
+        subtitle = (
+            f"Переходы через перерывы более {max_gap_days} календарных дней "
+            "исключены из расчёта."
+        )
+    else:
+        subtitle = "Доходности через длинные календарные перерывы включены в расчёт."
+
+    figure = go.Figure()
+    figure.add_trace(
+        go.Scatter(
+            x=time_axis,
+            y=returns,
+            mode="lines",
+            name="Логарифмическая доходность",
+            hovertemplate=(
+                "Дата: %{x|%Y-%m-%d}<br>"
+                "Логарифмическая доходность: %{y:.4f}<br>"
+                "log(Pₜ/Pₜ₋₁), где Pₜ — цена закрытия в день t"
+                "<extra></extra>"
+            ),
+        )
+    )
+    figure.add_hline(y=0)
+    figure.update_layout(
+        title=f"Логарифмическая доходность<br><sup>{subtitle}</sup>",
+        yaxis_title="log(Pₜ/Pₜ₋₁)",
+        hovermode="x unified",
+        showlegend=False,
+    )
+    return figure
 
 
 def render_data_selector() -> tuple[str, str]:
@@ -321,7 +382,28 @@ class _RussianUiTransformer(ast.NodeTransformer):
             if len(node.args) > 3:
                 node.args[3] = _translate_expression(node.args[3])
 
-        elif method in {"price_figure", "heatmap_figure"} and len(node.args) > 1:
+        elif method == "price_figure":
+            if len(node.args) > 1:
+                node.args[1] = _translate_expression(node.args[1])
+                node.args[1] = ast.copy_location(
+                    ast.Call(
+                        func=ast.Name(id="_price_figure_title", ctx=ast.Load()),
+                        args=[node.args[1], node.args[0]],
+                        keywords=[],
+                    ),
+                    node.args[1],
+                )
+            if node.args:
+                node.args[0] = ast.copy_location(
+                    ast.Call(
+                        func=ast.Name(id="_price_figure_candles", ctx=ast.Load()),
+                        args=[node.args[0]],
+                        keywords=[],
+                    ),
+                    node.args[0],
+                )
+
+        elif method == "heatmap_figure" and len(node.args) > 1:
             node.args[1] = _translate_expression(node.args[1])
 
         return node
@@ -379,19 +461,31 @@ if not gap_report.empty:
     return rewritten
 
 
-def _hide_imoex_volume(source: str) -> str:
-    old_call = 'price_figure(candles, f"{route.secid}: price and volume")'
-    new_call = '''price_figure(
-            candles.drop(columns=["volume"], errors="ignore")
-            if route.secid == "IMOEX"
-            else candles,
-            f"{route.secid}: price"
-            if route.secid == "IMOEX"
-            else f"{route.secid}: price and volume",
-        )'''
-    rewritten, count = source.replace(old_call, new_call, 1), source.count(old_call)
+def _rewrite_daily_return_chart(source: str) -> str:
+    old_block = '''    st.plotly_chart(
+        line_figure(
+            time_axis,
+            {"cleaned log return": returns, "raw log return": raw_returns},
+            "Logarithmic close-to-close returns",
+            "log(Pₜ/Pₜ₋₁)",
+            zero_line=True,
+        ),
+        use_container_width=True,
+    )
+'''
+    new_block = '''    st.plotly_chart(
+        _log_return_figure(
+            time_axis,
+            returns,
+            max_gap_days,
+            exclude_long_gaps,
+        ),
+        width="stretch",
+    )
+'''
+    rewritten, count = source.replace(old_block, new_block, 1), source.count(old_block)
     if count != 1:
-        raise RuntimeError("Не удалось настроить график цены IMOEX.")
+        raise RuntimeError("Не удалось обновить график логарифмической доходности.")
     return rewritten
 
 
@@ -419,7 +513,7 @@ def prepare_page_tree(page_path: Path, interval: str) -> ast.Module:
     )
     if interval == "1 day":
         source = _rewrite_daily_summary(source)
-        source = _hide_imoex_volume(source)
+        source = _rewrite_daily_return_chart(source)
     if interval == "1 day" and 'st.session_state["selected_secid"]' not in source:
         raise RuntimeError("Не удалось подключить выбранный инструмент к дневному анализу.")
     if interval == "1 hour" and 'st.session_state["selected_secid"]' not in source:
@@ -446,6 +540,9 @@ def run_asset_lab() -> None:
         "interval_label": selected_interval,
         "_localized_format_func": _localized_format_func,
         "_bounded_slider_input": _bounded_slider_input,
+        "_price_figure_candles": _price_figure_candles,
+        "_price_figure_title": _price_figure_title,
+        "_log_return_figure": _log_return_figure,
     }
     exec(compile(tree, str(page_path), "exec"), namespace)
 
