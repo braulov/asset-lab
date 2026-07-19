@@ -1,7 +1,12 @@
 import numpy as np
 import pandas as pd
 
-from asset_lab.analysis.relaxation import fit_relaxation_models
+from asset_lab.analysis.relaxation import (
+    cross_validate_relaxation_models,
+    fit_relaxation_models,
+    landau_relaxation,
+    predict_fit,
+)
 
 
 def test_exponential_data_prefers_exponential_or_stretched() -> None:
@@ -19,10 +24,36 @@ def test_exponential_data_prefers_exponential_or_stretched() -> None:
     fits, decision = fit_relaxation_models(aggregate)
     assert decision.allowed
     assert fits
-    assert fits[0].model in {"exponential", "stretched_exponential", "double_exponential"}
+    assert fits[0].model in {
+        "exponential",
+        "landau",
+        "stretched_exponential",
+        "double_exponential",
+    }
     assert fits[0].success
 
-from asset_lab.analysis.relaxation import cross_validate_relaxation_models
+
+def test_landau_is_available_in_daily_relaxation() -> None:
+    t = np.arange(0, 30, dtype=float)
+    values = landau_relaxation(t, amplitude=0.8, tau=9.0, theta=1.4)
+    aggregate = pd.DataFrame(
+        {
+            "offset": t + 1,
+            "median": values,
+            "bootstrap_ci_low": values * 0.8,
+            "bootstrap_ci_high": values * 1.2,
+            "count": 50,
+        }
+    )
+
+    fits, decision = fit_relaxation_models(aggregate)
+    by_model = {fit.model: fit for fit in fits}
+
+    assert decision.allowed
+    assert "landau" in by_model
+    assert by_model["landau"].success
+    prediction = predict_fit("landau", t, by_model["landau"].parameters)
+    assert np.sqrt(np.mean((prediction - values) ** 2)) < 1e-5
 
 
 def test_event_level_decay_cross_validation_returns_models() -> None:
@@ -55,3 +86,4 @@ def test_event_level_decay_cross_validation_returns_models() -> None:
     table = cross_validate_relaxation_models(trajectories, decision, folds=5)
     assert not table.empty
     assert "exponential" in set(table["model"])
+    assert "landau" in set(table["model"])
