@@ -62,6 +62,17 @@ def apply_asset_lab_style() -> None:
             padding-right: 0.8rem;
         }}
 
+        div[data-baseweb="select"] [data-baseweb="tag"] {{
+            max-width: none !important;
+        }}
+
+        div[data-baseweb="select"] [data-baseweb="tag"] span {{
+            max-width: none !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+            white-space: nowrap !important;
+        }}
+
         .asset-callout {{
             padding: 1rem 1.1rem;
             border: 1px solid var(--asset-border);
