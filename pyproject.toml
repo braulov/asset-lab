@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "asset-lab"
+version = "0.6.0"
+description = "MOEX daily and hourly volatility laboratory with M2/M3, mobility, matched controls, and mechanistic relaxation models."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=2.0,<3",
+  "pandas>=2.2,<3",
+  "plotly>=6.0,<7",
+  "requests>=2.32,<3",
+  "scipy>=1.14,<2",
+  "streamlit>=1.48,<2",
+  "statsmodels>=0.14,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<10",
+  "ruff>=0.9,<1",
+]
+
+[tool.setuptools.packages.find]
+include = ["asset_lab*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
