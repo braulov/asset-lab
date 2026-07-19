@@ -327,6 +327,58 @@ class _RussianUiTransformer(ast.NodeTransformer):
         return node
 
 
+def _rewrite_daily_summary(source: str) -> str:
+    pattern = re.compile(
+        r'metric_columns = st\.columns\(6\)\n'
+        r'.*?'
+        r'    with st\.expander\("Long calendar gaps"\):\n'
+        r'        st\.dataframe\(gap_report, use_container_width=True, hide_index=True\)\n',
+        flags=re.DOTALL,
+    )
+    replacement = '''excluded_gap_returns = int(raw_returns.notna().sum() - returns.notna().sum())
+summary_columns = st.columns(2)
+summary_columns[0].metric("Торговых дней", f"{len(candles):,}")
+summary_columns[1].metric("Исключено из-за разрывов", excluded_gap_returns)
+
+for warning in warnings:
+    st.warning(warning)
+
+if not gap_report.empty:
+    expander_title = (
+        "Исключено из-за разрывов — подробнее"
+        if exclude_long_gaps
+        else "Длинные календарные разрывы — подробнее"
+    )
+    with st.expander(expander_title):
+        if exclude_long_gaps:
+            st.markdown(
+                f"Между {len(gap_report)} парами соседних торговых дней прошло больше "
+                f"{max_gap_days} календарных дней. Доходность через такие перерывы не "
+                "используется в показателях, зависящих от предыдущей цены закрытия: "
+                "доходности закрытие–закрытие, ночном гэпе и оценках волатильности, "
+                "которые учитывают этот гэп. Сами дневные свечи из данных не удаляются."
+            )
+        else:
+            st.markdown(
+                f"Найдено {len(gap_report)} разрывов длиннее {max_gap_days} календарных "
+                "дней. Сейчас доходности через них оставлены в расчётах."
+            )
+        displayed_gaps = gap_report.rename(
+            columns={
+                "previous_timestamp": "Предыдущий торговый день",
+                "timestamp": "Следующий торговый день",
+                "gap_days": "Разрыв, календарных дней",
+                "log_return": "Доходность через разрыв",
+            }
+        )
+        st.dataframe(displayed_gaps, width="stretch", hide_index=True)
+'''
+    rewritten, count = pattern.subn(replacement, source, count=1)
+    if count != 1:
+        raise RuntimeError("Не удалось обновить сводку дневных данных.")
+    return rewritten
+
+
 def prepare_page_tree(page_path: Path, interval: str) -> ast.Module:
     source = page_path.read_text(encoding="utf-8")
     source = re.sub(
@@ -349,6 +401,8 @@ def prepare_page_tree(page_path: Path, interval: str) -> ast.Module:
         "",
         1,
     )
+    if interval == "1 day":
+        source = _rewrite_daily_summary(source)
     if interval == "1 day" and 'st.session_state["selected_secid"]' not in source:
         raise RuntimeError("Не удалось подключить выбранный инструмент к дневному анализу.")
     if interval == "1 hour" and 'st.session_state["selected_secid"]' not in source:
