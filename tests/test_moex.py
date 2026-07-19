@@ -45,3 +45,28 @@ def test_resolve_route_uses_primary() -> None:
     assert route.board == "TQBR"
     assert route.engine == "stock"
     assert route.market == "shares"
+
+
+class FakeCurrencyClient(MoexClient):
+    def get_boards(self, secid: str) -> pd.DataFrame:
+        assert secid == "USD000UTSTOM"
+        return pd.DataFrame(
+            [
+                {
+                    "secid": secid,
+                    "boardid": "CETS",
+                    "title": "Основной режим",
+                    "market": "selt",
+                    "engine": "currency",
+                    "is_primary": 1,
+                }
+            ]
+        )
+
+
+def test_usdrub_contract_alias_resolves_to_iss_secid() -> None:
+    route = FakeCurrencyClient().resolve_route("USDRUB_TOM")
+    assert route.secid == "USD000UTSTOM"
+    assert route.board == "CETS"
+    assert route.engine == "currency"
+    assert route.market == "selt"
