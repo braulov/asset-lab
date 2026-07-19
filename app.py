@@ -379,6 +379,22 @@ if not gap_report.empty:
     return rewritten
 
 
+def _hide_imoex_volume(source: str) -> str:
+    old_call = 'price_figure(candles, f"{route.secid}: price and volume")'
+    new_call = '''price_figure(
+            candles.drop(columns=["volume"], errors="ignore")
+            if route.secid == "IMOEX"
+            else candles,
+            f"{route.secid}: price"
+            if route.secid == "IMOEX"
+            else f"{route.secid}: price and volume",
+        )'''
+    rewritten, count = source.replace(old_call, new_call, 1), source.count(old_call)
+    if count != 1:
+        raise RuntimeError("Не удалось настроить график цены IMOEX.")
+    return rewritten
+
+
 def prepare_page_tree(page_path: Path, interval: str) -> ast.Module:
     source = page_path.read_text(encoding="utf-8")
     source = re.sub(
@@ -403,6 +419,7 @@ def prepare_page_tree(page_path: Path, interval: str) -> ast.Module:
     )
     if interval == "1 day":
         source = _rewrite_daily_summary(source)
+        source = _hide_imoex_volume(source)
     if interval == "1 day" and 'st.session_state["selected_secid"]' not in source:
         raise RuntimeError("Не удалось подключить выбранный инструмент к дневному анализу.")
     if interval == "1 hour" and 'st.session_state["selected_secid"]' not in source:
