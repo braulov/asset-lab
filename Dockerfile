@@ -8,6 +8,7 @@ WORKDIR /app
 
 COPY pyproject.toml README.md ./
 COPY asset_lab ./asset_lab
+COPY pages ./pages
 COPY app.py ./app.py
 COPY .streamlit ./.streamlit
 
