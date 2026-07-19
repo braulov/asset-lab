@@ -41,6 +41,27 @@ def exponential(t: np.ndarray, amplitude: float, tau: float) -> np.ndarray:
     return amplitude * np.exp(-t / tau)
 
 
+def landau_relaxation(
+    t: np.ndarray,
+    amplitude: float,
+    tau: float,
+    theta: float,
+) -> np.ndarray:
+    """Amplitude-aware Landau relaxation of excess variance.
+
+    The curve starts at ``amplitude`` and reduces to an ordinary exponential when
+    ``theta`` is zero. Positive ``theta`` makes large-amplitude events relax faster.
+    """
+    decay = np.exp(-np.asarray(t, dtype=float) / tau)
+    denominator = np.sqrt(
+        1.0
+        + theta
+        * amplitude**2
+        * np.maximum(1.0 - decay**2, 0.0)
+    )
+    return amplitude * decay / denominator
+
+
 def stretched_exponential(
     t: np.ndarray,
     amplitude: float,
@@ -83,6 +104,12 @@ MODEL_SPECS: dict[str, ModelSpec] = {
         ["amplitude", "tau"],
         [0.2, 3.0],
         ([0.0, 0.05], [10.0, 1000.0]),
+    ),
+    "landau": (
+        landau_relaxation,
+        ["amplitude", "tau", "theta"],
+        [0.2, 3.0, 0.1],
+        ([0.0, 0.05, 0.0], [20.0, 1000.0, 1000.0]),
     ),
     "stretched_exponential": (
         stretched_exponential,
@@ -289,9 +316,9 @@ def cross_validate_relaxation_models(
 ) -> pd.DataFrame:
     """Event-level cross-validation of decay curves.
 
-    Every fold holds out complete events.  Models are fitted to the training-event
+    Every fold holds out complete events. Models are fitted to the training-event
     median response and evaluated against the held-out-event median on the fixed decay
-    interval selected from the full response.  This is intentionally reported beside,
+    interval selected from the full response. This is intentionally reported beside,
     not replaced by, AIC/BIC because response points are serially dependent.
     """
     if (
