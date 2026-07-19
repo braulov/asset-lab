@@ -11,6 +11,7 @@ import streamlit as st
 import asset_lab.localization as localization
 from asset_lab.data.moex import MoexApiError, MoexClient
 from asset_lab.localization_content import EXTRA_PHRASES, EXTRA_TEXT
+from asset_lab.ui import bounded_number_input
 
 
 st.set_page_config(page_title="Asset Lab v6", page_icon="📈", layout="wide")
@@ -54,6 +55,44 @@ def _localized_format_func(
         return localization.translate_text(displayed)
 
     return render
+
+
+def _bounded_slider_input(
+    label: str,
+    min_value: int | float | None = None,
+    max_value: int | float | None = None,
+    value: int | float | None = None,
+    step: int | float | None = None,
+    format: str | None = None,
+    key: str | None = None,
+    help: str | None = None,
+    on_change: Callable[..., Any] | None = None,
+    args: tuple[Any, ...] | None = None,
+    kwargs: dict[str, Any] | None = None,
+    *,
+    disabled: bool = False,
+    label_visibility: str = "visible",
+    **_: Any,
+) -> int | float:
+    if min_value is None or max_value is None or value is None:
+        raise ValueError("Для числового параметра должны быть заданы минимум, максимум и значение.")
+    if isinstance(value, (tuple, list)):
+        raise ValueError("Диапазон из двух значений пока не поддерживается числовым полем.")
+    return bounded_number_input(
+        label,
+        min_value=min_value,
+        max_value=max_value,
+        value=value,
+        step=step,
+        key=key,
+        format=format,
+        help=help,
+        on_change=on_change,
+        args=args,
+        kwargs=kwargs,
+        disabled=disabled,
+        label_visibility=label_visibility,
+    )
 
 
 def render_data_selector() -> tuple[str, str]:
@@ -178,7 +217,6 @@ class _RussianUiTransformer(ast.NodeTransformer):
         "date_input",
         "time_input",
         "number_input",
-        "slider",
         "checkbox",
         "toggle",
         "button",
@@ -196,7 +234,18 @@ class _RussianUiTransformer(ast.NodeTransformer):
         name = _call_name(node.func)
         method = name.rsplit(".", 1)[-1]
 
-        if name.startswith("st.") and method in self._label_methods:
+        if method == "slider":
+            if node.args:
+                node.args[0] = _translate_expression(node.args[0])
+            for keyword in node.keywords:
+                if keyword.arg in {"label", "help", "placeholder"}:
+                    keyword.value = _translate_expression(keyword.value)
+            node.func = ast.copy_location(
+                ast.Name(id="_bounded_slider_input", ctx=ast.Load()),
+                node.func,
+            )
+
+        elif name.startswith("st.") and method in self._label_methods:
             if node.args:
                 node.args[0] = _translate_expression(node.args[0])
             for keyword in node.keywords:
@@ -304,6 +353,7 @@ def run_asset_lab() -> None:
         "__package__": None,
         "interval_label": selected_interval,
         "_localized_format_func": _localized_format_func,
+        "_bounded_slider_input": _bounded_slider_input,
     }
     exec(compile(tree, str(page_path), "exec"), namespace)
 
