@@ -12,16 +12,30 @@ import streamlit as st
 import asset_lab.localization as localization
 from asset_lab.data.moex import MoexApiError, MoexClient
 from asset_lab.localization_content import EXTRA_PHRASES, EXTRA_TEXT
-from asset_lab.ui import bounded_number_input
+from asset_lab.ui import apply_asset_lab_style, bounded_number_input
 
 
 st.set_page_config(page_title="Asset Lab v6", page_icon="📈", layout="wide")
+apply_asset_lab_style()
 localization.EXACT_TEXT.update(EXTRA_TEXT)
+localization.EXACT_TEXT.update(
+    {
+        "Rolling volatility window": "Окно расчёта исторической волатильности",
+        "Daily variance proxies shown": "Показываемые оценки дисперсии",
+        "Rolling annualised volatility estimates": "Оценки исторической волатильности",
+        "Close-to-close squared return": "Квадрат логарифмической доходности",
+        "Parkinson": "Паркинсон",
+        "Garman–Klass": "Гарман—Класс",
+        "Rogers–Satchell": "Роджерс—Сатчелл",
+        "Gap² + Rogers–Satchell": "Ночной разрыв² + Роджерс—Сатчелл",
+        "Yang–Zhang daily contribution": "Вклад Янга—Чжана",
+        "Yang–Zhang rolling": "Янг—Чжан",
+        "Volatility": "Годовая волатильность",
+    }
+)
 localization.PHRASE_REPLACEMENTS = tuple(
     dict.fromkeys((*localization.PHRASE_REPLACEMENTS, *EXTRA_PHRASES))
 )
-# Streamlit may recreate its exported UI methods between script runs. Reinstall the
-# wrappers instead of relying on module state from the previous run.
 localization._PATCHED = False
 localization.install_russian_interface()
 
@@ -117,43 +131,69 @@ def _price_figure_title(title: str, candles: pd.DataFrame) -> str:
     )
 
 
+def _clean_log_returns_for_display(
+    time_axis: pd.Index,
+    raw_returns: pd.Series,
+    max_gap_days: int,
+) -> pd.Series:
+    timestamps = pd.DatetimeIndex(pd.to_datetime(time_axis, errors="coerce"))
+    values = pd.Series(
+        pd.to_numeric(raw_returns, errors="coerce").to_numpy(),
+        index=timestamps,
+        dtype=float,
+    )
+    gaps = timestamps.to_series(index=timestamps).diff().dt.total_seconds() / 86_400.0
+    return values.mask(gaps > max_gap_days)
+
+
 def _log_return_figure(
     time_axis: pd.Index,
-    returns: pd.Series,
+    raw_returns: pd.Series,
     max_gap_days: int,
-    exclude_long_gaps: bool,
 ) -> go.Figure:
-    if exclude_long_gaps:
-        subtitle = (
-            f"Переходы через перерывы более {max_gap_days} календарных дней "
-            "исключены из расчёта."
-        )
-    else:
-        subtitle = "Доходности через длинные календарные перерывы включены в расчёт."
-
+    returns = _clean_log_returns_for_display(time_axis, raw_returns, max_gap_days)
     figure = go.Figure()
     figure.add_trace(
         go.Scatter(
-            x=time_axis,
+            x=returns.index,
             y=returns,
             mode="lines",
+            connectgaps=True,
             name="Логарифмическая доходность",
             hovertemplate=(
                 "Дата: %{x|%Y-%m-%d}<br>"
-                "Логарифмическая доходность: %{y:.4f}<br>"
-                "log(Pₜ/Pₜ₋₁), где Pₜ — цена закрытия в день t"
+                "Логарифмическая доходность: %{y:.4f}"
                 "<extra></extra>"
             ),
         )
     )
     figure.add_hline(y=0)
     figure.update_layout(
-        title=f"Логарифмическая доходность<br><sup>{subtitle}</sup>",
         yaxis_title="log(Pₜ/Pₜ₋₁)",
         hovermode="x unified",
         showlegend=False,
+        margin={"t": 8},
     )
     return figure
+
+
+def _render_log_return_chart(
+    time_axis: pd.Index,
+    raw_returns: pd.Series,
+    max_gap_days: int,
+) -> None:
+    st.subheader(
+        "Логарифмическая доходность",
+        help=(
+            "Значение за день: log(Pₜ/Pₜ₋₁), где Pₜ — цена закрытия в день t. "
+            f"Переходы через перерывы более {max_gap_days} календарных дней "
+            "не учитываются."
+        ),
+    )
+    st.plotly_chart(
+        _log_return_figure(time_axis, raw_returns, max_gap_days),
+        width="stretch",
+    )
 
 
 def render_data_selector() -> tuple[str, str]:
@@ -166,13 +206,11 @@ def render_data_selector() -> tuple[str, str]:
 
     with st.sidebar:
         st.header("Данные")
-
         instrument = st.selectbox(
             "Инструмент",
             list(INSTRUMENTS),
             key="instrument_choice",
         )
-
         preset_secid = INSTRUMENTS[instrument]
         if preset_secid is None:
             secid = st.text_input(
@@ -208,7 +246,7 @@ def render_data_selector() -> tuple[str, str]:
                     found_secid = st.selectbox(
                         "Результаты",
                         options,
-                        format_func=lambda value: labels.get(value, value),
+                        format_func=lambda item: labels.get(item, item),
                         key="instrument_search_result",
                     )
                     if st.button("Выбрать", width="stretch"):
@@ -326,14 +364,12 @@ class _RussianUiTransformer(ast.NodeTransformer):
                 ast.Name(id="_bounded_slider_input", ctx=ast.Load()),
                 node.func,
             )
-
         elif name.startswith("st.") and method in self._label_methods:
             if node.args:
                 node.args[0] = _translate_expression(node.args[0])
             for keyword in node.keywords:
                 if keyword.arg in {"label", "help", "placeholder"}:
                     keyword.value = _translate_expression(keyword.value)
-
         elif name.startswith("st.") and method in self._choice_methods:
             if node.args:
                 node.args[0] = _translate_expression(node.args[0])
@@ -354,10 +390,8 @@ class _RussianUiTransformer(ast.NodeTransformer):
                 node.keywords.append(ast.keyword(arg="format_func", value=composed))
             else:
                 format_keyword.value = composed
-
         elif name == "st.tabs" and node.args:
             node.args[0] = _translate_expression(node.args[0])
-
         elif method == "update_layout":
             for keyword in node.keywords:
                 if keyword.arg in {
@@ -368,12 +402,10 @@ class _RussianUiTransformer(ast.NodeTransformer):
                     "legend_title",
                 }:
                     keyword.value = _translate_expression(keyword.value)
-
         elif name in {"go.Scatter", "go.Bar", "go.Candlestick"}:
             for keyword in node.keywords:
                 if keyword.arg in {"name", "hovertemplate", "texttemplate"}:
                     keyword.value = _translate_expression(keyword.value)
-
         elif method == "line_figure":
             if len(node.args) > 1:
                 node.args[1] = _translate_expression(node.args[1])
@@ -381,7 +413,6 @@ class _RussianUiTransformer(ast.NodeTransformer):
                 node.args[2] = _translate_expression(node.args[2])
             if len(node.args) > 3:
                 node.args[3] = _translate_expression(node.args[3])
-
         elif method == "price_figure":
             if len(node.args) > 1:
                 node.args[1] = _translate_expression(node.args[1])
@@ -402,7 +433,6 @@ class _RussianUiTransformer(ast.NodeTransformer):
                     ),
                     node.args[0],
                 )
-
         elif method == "heatmap_figure" and len(node.args) > 1:
             node.args[1] = _translate_expression(node.args[1])
 
@@ -437,8 +467,8 @@ if not gap_report.empty:
                 f"Между {len(gap_report)} парами соседних торговых дней прошло больше "
                 f"{max_gap_days} календарных дней. Доходность через такие перерывы не "
                 "используется в показателях, зависящих от предыдущей цены закрытия: "
-                "доходности закрытие–закрытие, ночном гэпе и оценках волатильности, "
-                "которые учитывают этот гэп. Сами дневные свечи из данных не удаляются."
+                "логарифмической доходности, ночном разрыве и оценках волатильности, "
+                "которые учитывают этот разрыв. Сами дневные свечи из данных не удаляются."
             )
         else:
             st.markdown(
@@ -473,20 +503,43 @@ def _rewrite_daily_return_chart(source: str) -> str:
         use_container_width=True,
     )
 '''
-    new_block = '''    st.plotly_chart(
-        _log_return_figure(
-            time_axis,
-            returns,
-            max_gap_days,
-            exclude_long_gaps,
-        ),
-        width="stretch",
+    new_block = '''    _render_log_return_chart(
+        time_axis,
+        raw_returns,
+        max_gap_days,
     )
 '''
     rewritten, count = source.replace(old_block, new_block, 1), source.count(old_block)
     if count != 1:
         raise RuntimeError("Не удалось обновить график логарифмической доходности.")
     return rewritten
+
+
+def _rewrite_volatility_overview(source: str) -> str:
+    old_window = '    overview_window = st.slider("Rolling volatility window", 5, 120, 20, key="overview_window")\n'
+    new_window = '''    overview_window = st.slider(
+        "Окно расчёта исторической волатильности",
+        5,
+        120,
+        20,
+        key="overview_window",
+        help="Для каждой даты используются последние N торговых периодов.",
+    )
+'''
+    source, window_count = source.replace(old_window, new_window, 1), source.count(old_window)
+    source = source.replace(
+        '        "Daily variance proxies shown",\n',
+        '        "Показываемые оценки дисперсии",\n',
+        1,
+    )
+    source = source.replace(
+        '            "Rolling annualised volatility estimates",\n',
+        '            "Оценки исторической волатильности",\n',
+        1,
+    )
+    if window_count != 1:
+        raise RuntimeError("Не удалось обновить параметры исторической волатильности.")
+    return source
 
 
 def prepare_page_tree(page_path: Path, interval: str) -> ast.Module:
@@ -514,6 +567,7 @@ def prepare_page_tree(page_path: Path, interval: str) -> ast.Module:
     if interval == "1 day":
         source = _rewrite_daily_summary(source)
         source = _rewrite_daily_return_chart(source)
+        source = _rewrite_volatility_overview(source)
     if interval == "1 day" and 'st.session_state["selected_secid"]' not in source:
         raise RuntimeError("Не удалось подключить выбранный инструмент к дневному анализу.")
     if interval == "1 hour" and 'st.session_state["selected_secid"]' not in source:
@@ -542,7 +596,7 @@ def run_asset_lab() -> None:
         "_bounded_slider_input": _bounded_slider_input,
         "_price_figure_candles": _price_figure_candles,
         "_price_figure_title": _price_figure_title,
-        "_log_return_figure": _log_return_figure,
+        "_render_log_return_chart": _render_log_return_chart,
     }
     exec(compile(tree, str(page_path), "exec"), namespace)
 
